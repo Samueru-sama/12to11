@@ -2962,6 +2962,12 @@ ValidateShmParams (uint32_t format, uint32_t width, uint32_t height,
       || total_size > pool_size)
     return False;
 
+  /* The widened pixmap width must not exceed the server's pixmap
+     dimension limit; otherwise ShmCreatePixmap fails with BadAlloc, or
+     the width is truncated through the 16-bit request field.  */
+  if (stride / (bpp / 8) > 32767)
+    return False;
+
   return True;
 }
 
