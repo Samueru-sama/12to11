@@ -36,6 +36,10 @@ struct _Fence
   /* The sync fence.  */
   XSyncFence fence_id;
 
+  /* True if fence_id refers to a real server fence (i.e. the fence fd was
+     imported via DRI3).  */
+  Bool server_fence;
+
   /* The number of references to this fence.  Incremented by
      FenceRetain, decremented by FenceRelease.  */
   int refcount;
@@ -52,6 +56,20 @@ GetFence (void)
 
   /* Allocate a new fence.  */
   fence = XLCalloc (1, sizeof *fence);
+
+  /* DRI3 is required to import a fence fd into the X server.  Without it
+     the server cannot trigger our xshmfence, so hand out a fence that is
+     never waited on (and present without an idle fence).  */
+  if (!XLHaveDri3)
+    {
+      fence->fence = NULL;
+      fence->fence_id = None;
+      fence->server_fence = False;
+      FenceRetain (fence);
+
+      return fence;
+    }
+
   fd = xshmfence_alloc_shm ();
 
   if (fd < 0)
@@ -72,6 +90,7 @@ GetFence (void)
   /* Upload the fence to the X server.  XCB will close the file
      descriptor.  */
   fence->fence_id = xcb_generate_id (compositor.conn);
+  fence->server_fence = True;
 
   /* Make the file descriptor CLOEXEC, since it isn't closed
      immediately.  */
@@ -89,6 +108,10 @@ GetFence (void)
 void
 FenceAwait (Fence *fence)
 {
+  if (!fence->server_fence)
+    /* Nothing will ever trigger this fence.  */
+    return;
+
   /* Wait for the fence to be triggered.  */
   xshmfence_await (fence->fence);
 
@@ -102,11 +125,14 @@ FenceRelease (Fence *fence)
   if (--fence->refcount)
     return;
 
-  /* Unmap the fence.  */
-  xshmfence_unmap_shm (fence->fence);
+  if (fence->server_fence)
+    {
+      /* Unmap the fence.  */
+      xshmfence_unmap_shm (fence->fence);
 
-  /* Destroy the fence.  */
-  XSyncDestroyFence (compositor.display, fence->fence_id);
+      /* Destroy the fence.  */
+      XSyncDestroyFence (compositor.display, fence->fence_id);
+    }
 
   /* Free the fence.  */
   XLFree (fence);
