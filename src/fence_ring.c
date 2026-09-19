@@ -36,10 +36,6 @@ struct _Fence
   /* The sync fence.  */
   XSyncFence fence_id;
 
-  /* True if fence_id refers to a real server fence (i.e. the fence fd was
-     imported via DRI3).  */
-  Bool server_fence;
-
   /* The number of references to this fence.  Incremented by
      FenceRetain, decremented by FenceRelease.  */
   int refcount;
@@ -64,7 +60,6 @@ GetFence (void)
     {
       fence->fence = NULL;
       fence->fence_id = None;
-      fence->server_fence = False;
       FenceRetain (fence);
 
       return fence;
@@ -90,7 +85,6 @@ GetFence (void)
   /* Upload the fence to the X server.  XCB will close the file
      descriptor.  */
   fence->fence_id = xcb_generate_id (compositor.conn);
-  fence->server_fence = True;
 
   /* Make the file descriptor CLOEXEC, since it isn't closed
      immediately.  */
@@ -108,7 +102,7 @@ GetFence (void)
 void
 FenceAwait (Fence *fence)
 {
-  if (!fence->server_fence)
+  if (!fence->fence)
     /* Nothing will ever trigger this fence.  */
     return;
 
@@ -125,7 +119,7 @@ FenceRelease (Fence *fence)
   if (--fence->refcount)
     return;
 
-  if (fence->server_fence)
+  if (fence->fence)
     {
       /* Unmap the fence.  */
       xshmfence_unmap_shm (fence->fence);
